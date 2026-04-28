@@ -1,4 +1,5 @@
 .DS_Store
-venv
-*.jpg
-*.png
+venv/
+__pycache__/
+*.pyc
+*_recut.*
