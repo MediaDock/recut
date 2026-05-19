@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 
-VIDEO_EXTENSIONS = frozenset({".mp4"})
+VIDEO_EXTENSIONS = frozenset({".mp4", ".mov"})
 IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"})
 
 _TARGET_W = 4160
@@ -97,20 +97,39 @@ def process_video(paths: list) -> None:
     n = len(paths)
 
     caps = []
+    static_frames = []  # BGR frame for image inputs, None for video inputs
     for p in paths:
-        cap = cv2.VideoCapture(str(p))
-        if not cap.isOpened():
-            print(f"Error: cannot open video: {p}")
-            sys.exit(1)
-        caps.append(cap)
+        if p.suffix.lower() in IMAGE_EXTENSIONS:
+            try:
+                img = Image.open(p).convert("RGB")
+            except (FileNotFoundError, Image.UnidentifiedImageError) as e:
+                print(f"Error: cannot open image: {p}")
+                sys.exit(1)
+            caps.append(None)
+            static_frames.append(cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR))
+        else:
+            cap = cv2.VideoCapture(str(p))
+            if not cap.isOpened():
+                print(f"Error: cannot open video: {p}")
+                sys.exit(1)
+            caps.append(cap)
+            static_frames.append(None)
 
-    fps_values = [cap.get(cv2.CAP_PROP_FPS) for cap in caps]
+    video_caps = [cap for cap in caps if cap is not None]
+    fps_values = [cap.get(cv2.CAP_PROP_FPS) for cap in video_caps]
     fps = max(fps_values)
-    frame_counts = [int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) for cap in caps]
+    frame_counts = [int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) for cap in video_caps]
     total_frames = max(frame_counts) if all(fc > 0 for fc in frame_counts) else 0
 
-    widths = [int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) for cap in caps]
-    heights = [int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) for cap in caps]
+    widths, heights = [], []
+    for i, p in enumerate(paths):
+        if caps[i] is None:
+            h, w = static_frames[i].shape[:2]
+        else:
+            w = int(caps[i].get(cv2.CAP_PROP_FRAME_WIDTH))
+            h = int(caps[i].get(cv2.CAP_PROP_FRAME_HEIGHT))
+        widths.append(w)
+        heights.append(h)
     _validate(sum(widths), heights)
 
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp4")
@@ -132,11 +151,14 @@ def process_video(paths: list) -> None:
             any_ok = False
             frames = []
             for i, cap in enumerate(caps):
-                ok, frame = cap.read()
-                if ok:
-                    last_frames[i] = frame
-                    any_ok = True
-                frames.append(last_frames[i])
+                if cap is None:
+                    frames.append(static_frames[i])
+                else:
+                    ok, frame = cap.read()
+                    if ok:
+                        last_frames[i] = frame
+                        any_ok = True
+                    frames.append(last_frames[i])
 
             if not any_ok:
                 break
@@ -161,7 +183,8 @@ def process_video(paths: list) -> None:
         print()
 
         stem = "_".join(p.stem for p in paths) + "_recut"
-        output_path = paths[0].with_stem(stem)
+        video_path = next(p for p in paths if p.suffix.lower() in VIDEO_EXTENSIONS)
+        output_path = video_path.parent / (stem + video_path.suffix)
         try:
             subprocess.run(
                 [
@@ -183,7 +206,8 @@ def process_video(paths: list) -> None:
             sys.exit(1)
     finally:
         for cap in caps:
-            cap.release()
+            if cap is not None:
+                cap.release()
         if writer is not None:
             writer.release()
         os.unlink(tmp_path)
@@ -203,18 +227,18 @@ def main() -> None:
             sys.exit(1)
 
     exts = [p.suffix.lower() for p in paths]
-    if len(set(exts)) > 1:
-        print("Error: all inputs must be the same file type")
+    unknown = [p for p in paths if p.suffix.lower() not in IMAGE_EXTENSIONS | VIDEO_EXTENSIONS]
+    if unknown:
+        print(f"Error: unsupported file type '{unknown[0].suffix}'")
         sys.exit(1)
 
-    ext = exts[0]
-    if ext in IMAGE_EXTENSIONS:
-        process_image(paths)
-    elif ext in VIDEO_EXTENSIONS:
+    has_video = any(e in VIDEO_EXTENSIONS for e in exts)
+    has_image = any(e in IMAGE_EXTENSIONS for e in exts)
+
+    if has_video:
         process_video(paths)
     else:
-        print(f"Error: unsupported file type '{ext}'")
-        sys.exit(1)
+        process_image(paths)
 
 
 if __name__ == "__main__":
