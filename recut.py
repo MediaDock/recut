@@ -14,13 +14,14 @@ _TARGET_W = 4160
 _TARGET_H = 104
 
 
-def _validate(width: int, height: int, slot_w: int = _TARGET_W) -> None:
-    if slot_w % width != 0:
-        print(f"Error: width {width} does not evenly divide {slot_w}")
+def _validate(total_w: int, heights: list) -> None:
+    if _TARGET_W % total_w != 0:
+        print(f"Error: combined width {total_w} does not evenly divide {_TARGET_W}")
         sys.exit(1)
-    if _TARGET_H % height != 0:
-        print(f"Error: height {height} does not evenly divide {_TARGET_H}")
-        sys.exit(1)
+    for h in heights:
+        if _TARGET_H % h != 0:
+            print(f"Error: height {h} does not evenly divide {_TARGET_H}")
+            sys.exit(1)
 
 
 def _tile_to(img: Image.Image, w: int, h: int) -> Image.Image:
@@ -35,12 +36,14 @@ def _tile_to(img: Image.Image, w: int, h: int) -> Image.Image:
 
 
 def _compose(imgs: list) -> Image.Image:
-    n = len(imgs)
-    slot_w = _TARGET_W // n
-    combined = Image.new("RGB", (_TARGET_W, _TARGET_H))
-    for i, img in enumerate(imgs):
-        combined.paste(_tile_to(img, slot_w, _TARGET_H), (i * slot_w, 0))
-    return _transform(combined)
+    strips = [_tile_to(img, img.width, _TARGET_H) for img in imgs]
+    total_w = sum(s.width for s in strips)
+    stitched = Image.new("RGB", (total_w, _TARGET_H))
+    x = 0
+    for s in strips:
+        stitched.paste(s, (x, 0))
+        x += s.width
+    return _transform(_tile_to(stitched, _TARGET_W, _TARGET_H))
 
 
 def _transform(img: Image.Image) -> Image.Image:
@@ -71,12 +74,6 @@ def _pil_to_bgr(img: Image.Image) -> np.ndarray:
 
 
 def process_image(paths: list) -> None:
-    n = len(paths)
-    if _TARGET_W % n != 0:
-        print(f"Error: {n} inputs do not evenly divide banner width {_TARGET_W}")
-        sys.exit(1)
-    slot_w = _TARGET_W // n
-
     imgs = []
     for p in paths:
         try:
@@ -87,8 +84,9 @@ def process_image(paths: list) -> None:
         except Image.UnidentifiedImageError:
             print(f"Error: not a valid image: {p}")
             sys.exit(1)
-        _validate(img.width, img.height, slot_w)
         imgs.append(img)
+
+    _validate(sum(img.width for img in imgs), [img.height for img in imgs])
 
     canvas = _compose(imgs)
     stem = "_".join(p.stem for p in paths) + "_recut"
@@ -99,10 +97,6 @@ def process_image(paths: list) -> None:
 
 def process_video(paths: list) -> None:
     n = len(paths)
-    if _TARGET_W % n != 0:
-        print(f"Error: {n} inputs do not evenly divide banner width {_TARGET_W}")
-        sys.exit(1)
-    slot_w = _TARGET_W // n
 
     caps = []
     for p in paths:
@@ -117,12 +111,9 @@ def process_video(paths: list) -> None:
     frame_counts = [int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) for cap in caps]
     total_frames = max(frame_counts) if all(fc > 0 for fc in frame_counts) else 0
 
-    for cap, p in zip(caps, paths):
-        _validate(
-            int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-            int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-            slot_w,
-        )
+    widths = [int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) for cap in caps]
+    heights = [int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) for cap in caps]
+    _validate(sum(widths), heights)
 
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp4")
     os.close(tmp_fd)
