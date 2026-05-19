@@ -47,8 +47,6 @@ def _compose(imgs: list) -> Image.Image:
 
 
 def _transform(img: Image.Image) -> Image.Image:
-    img = _tile_to(img, _TARGET_W, _TARGET_H)
-
     piece1 = img.crop((0,    0, 1872, _TARGET_H))
     piece2 = img.crop((1872, 0, 3744, _TARGET_H))
     piece3 = img.crop((3744, 0, _TARGET_W, _TARGET_H))
@@ -118,6 +116,7 @@ def process_video(paths: list) -> None:
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp4")
     os.close(tmp_fd)
 
+    writer = None
     try:
         writer = cv2.VideoWriter(
             tmp_path,
@@ -157,9 +156,8 @@ def process_video(paths: list) -> None:
             label = str(total_frames) if total_frames else "?"
             print(f"\rFrame {idx}/{label}", end="", flush=True)
 
-        for cap in caps:
-            cap.release()
         writer.release()
+        writer = None
         print()
 
         stem = "_".join(p.stem for p in paths) + "_recut"
@@ -186,6 +184,8 @@ def process_video(paths: list) -> None:
     finally:
         for cap in caps:
             cap.release()
+        if writer is not None:
+            writer.release()
         os.unlink(tmp_path)
 
     print(f"Saved to {output_path}")
