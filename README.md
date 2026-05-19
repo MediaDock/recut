@@ -1,8 +1,17 @@
 # recut
 
-Prepares content for the LED banner by slicing a 4160×104 image (or video frame) into three strips and composing them onto a 1920×1080 canvas.
+Prepares content for the LED banner by slicing an image (or video frame) into three strips and composing them onto a display canvas.
 
-A single input is remapped directly if it is 4160px wide, or tiled to fill 4160px if it is a fraction of that width. Multiple inputs are stitched side by side and the combined strip is tiled to fill 4160px — so two 1040px inputs become a 2080px unit that repeats twice. The combined width must evenly divide 4160, and each input's height must evenly divide 104. For videos with different lengths, shorter inputs freeze on their last frame.
+| | |
+|---|---|
+| LED wall | 4160 × 104 px |
+| Output canvas | 1920 × 1080 px |
+| Input width | must evenly divide 4160 px (e.g. 1040, 2080, 4160) |
+| Input height | must evenly divide 104 px |
+| Image formats | JPEG, PNG, BMP, TIFF, WebP |
+| Video formats | MP4 |
+
+A single input is remapped directly if it is 4160 px wide, or tiled to fill 4160 px if narrower. Multiple inputs are stitched side by side and the combined strip is tiled — so two 1040 px inputs become a 2080 px unit that repeats twice. The combined width must evenly divide 4160, and each input's height must evenly divide 104. For videos with different lengths, shorter inputs freeze on their last frame.
 
 ![styleguide](.readme/styleguide.png)
 
@@ -10,7 +19,6 @@ A single input is remapped directly if it is 4160px wide, or tiled to fill 4160p
 
 - Python 3.9+
 - [ffmpeg](https://ffmpeg.org/download.html) on your `PATH` (video only)
-- Supported formats: JPEG, PNG, BMP, TIFF, WebP (image) · MP4 (video)
 
 ## Usage
 
