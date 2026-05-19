@@ -14,24 +14,37 @@ _TARGET_W = 4160
 _TARGET_H = 104
 
 
-def _validate(width: int, height: int) -> None:
-    if _TARGET_W % width != 0:
-        print(f"Error: width {width} does not evenly divide {_TARGET_W}")
+def _validate(width: int, height: int, slot_w: int = _TARGET_W) -> None:
+    if slot_w % width != 0:
+        print(f"Error: width {width} does not evenly divide {slot_w}")
         sys.exit(1)
     if _TARGET_H % height != 0:
         print(f"Error: height {height} does not evenly divide {_TARGET_H}")
         sys.exit(1)
 
 
+def _tile_to(img: Image.Image, w: int, h: int) -> Image.Image:
+    nx, ny = w // img.width, h // img.height
+    if nx == 1 and ny == 1:
+        return img
+    tiled = Image.new("RGB", (w, h))
+    for row in range(ny):
+        for col in range(nx):
+            tiled.paste(img, (col * img.width, row * img.height))
+    return tiled
+
+
+def _compose(imgs: list) -> Image.Image:
+    n = len(imgs)
+    slot_w = _TARGET_W // n
+    combined = Image.new("RGB", (_TARGET_W, _TARGET_H))
+    for i, img in enumerate(imgs):
+        combined.paste(_tile_to(img, slot_w, _TARGET_H), (i * slot_w, 0))
+    return _transform(combined)
+
+
 def _transform(img: Image.Image) -> Image.Image:
-    nx = _TARGET_W // img.width
-    ny = _TARGET_H // img.height
-    if nx > 1 or ny > 1:
-        tiled = Image.new("RGB", (_TARGET_W, _TARGET_H))
-        for row in range(ny):
-            for col in range(nx):
-                tiled.paste(img, (col * img.width, row * img.height))
-        img = tiled
+    img = _tile_to(img, _TARGET_W, _TARGET_H)
 
     piece1 = img.crop((0,    0, 1872, _TARGET_H))
     piece2 = img.crop((1872, 0, 3744, _TARGET_H))
@@ -49,33 +62,67 @@ def _transform_bgr(frame: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(np.array(_transform(pil)), cv2.COLOR_RGB2BGR)
 
 
-def process_image(input_path: Path) -> None:
-    try:
-        img = Image.open(input_path)
-    except FileNotFoundError:
-        print(f"Error: file not found: {input_path}")
-        sys.exit(1)
-    except Image.UnidentifiedImageError:
-        print(f"Error: not a valid image: {input_path}")
-        sys.exit(1)
+def _frame_to_pil(frame: np.ndarray) -> Image.Image:
+    return Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
-    _validate(img.width, img.height)
-    canvas = _transform(img)
 
-    output_path = input_path.with_stem(input_path.stem + "_recut")
+def _pil_to_bgr(img: Image.Image) -> np.ndarray:
+    return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+
+
+def process_image(paths: list) -> None:
+    n = len(paths)
+    if _TARGET_W % n != 0:
+        print(f"Error: {n} inputs do not evenly divide banner width {_TARGET_W}")
+        sys.exit(1)
+    slot_w = _TARGET_W // n
+
+    imgs = []
+    for p in paths:
+        try:
+            img = Image.open(p)
+        except FileNotFoundError:
+            print(f"Error: file not found: {p}")
+            sys.exit(1)
+        except Image.UnidentifiedImageError:
+            print(f"Error: not a valid image: {p}")
+            sys.exit(1)
+        _validate(img.width, img.height, slot_w)
+        imgs.append(img)
+
+    canvas = _compose(imgs)
+    stem = "_".join(p.stem for p in paths) + "_recut"
+    output_path = paths[0].with_stem(stem)
     canvas.save(output_path)
     print(f"Saved to {output_path}")
 
 
-def process_video(input_path: Path) -> None:
-    cap = cv2.VideoCapture(str(input_path))
-    if not cap.isOpened():
-        print(f"Error: cannot open video: {input_path}")
+def process_video(paths: list) -> None:
+    n = len(paths)
+    if _TARGET_W % n != 0:
+        print(f"Error: {n} inputs do not evenly divide banner width {_TARGET_W}")
         sys.exit(1)
+    slot_w = _TARGET_W // n
 
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    _validate(int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+    caps = []
+    for p in paths:
+        cap = cv2.VideoCapture(str(p))
+        if not cap.isOpened():
+            print(f"Error: cannot open video: {p}")
+            sys.exit(1)
+        caps.append(cap)
+
+    fps_values = [cap.get(cv2.CAP_PROP_FPS) for cap in caps]
+    fps = max(fps_values)
+    frame_counts = [int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) for cap in caps]
+    total_frames = max(frame_counts) if all(fc > 0 for fc in frame_counts) else 0
+
+    for cap, p in zip(caps, paths):
+        _validate(
+            int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+            int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+            slot_w,
+        )
 
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp4")
     os.close(tmp_fd)
@@ -88,32 +135,52 @@ def process_video(input_path: Path) -> None:
             (1920, 1080),
         )
 
+        last_frames = [None] * n
         idx = 0
+
         while True:
-            ok, frame = cap.read()
-            if not ok:
+            any_ok = False
+            frames = []
+            for i, cap in enumerate(caps):
+                ok, frame = cap.read()
+                if ok:
+                    last_frames[i] = frame
+                    any_ok = True
+                frames.append(last_frames[i])
+
+            if not any_ok:
                 break
-            writer.write(_transform_bgr(frame))
+
+            if any(f is None for f in frames):
+                print("\nError: one or more inputs yielded no readable frames")
+                sys.exit(1)
+
+            if n == 1:
+                out_frame = _transform_bgr(frames[0])
+            else:
+                pils = [_frame_to_pil(f) for f in frames]
+                out_frame = _pil_to_bgr(_compose(pils))
+
+            writer.write(out_frame)
             idx += 1
-            label = str(frame_count) if frame_count else "?"
+            label = str(total_frames) if total_frames else "?"
             print(f"\rFrame {idx}/{label}", end="", flush=True)
 
-        cap.release()
+        for cap in caps:
+            cap.release()
         writer.release()
         print()
 
-        output_path = input_path.with_stem(input_path.stem + "_recut")
+        stem = "_".join(p.stem for p in paths) + "_recut"
+        output_path = paths[0].with_stem(stem)
         try:
             subprocess.run(
                 [
                     "ffmpeg", "-y",
                     "-i", tmp_path,
-                    "-i", str(input_path),
                     "-map", "0:v:0",
-                    "-map", "1:a?",
                     "-c:v", "libx264",
                     "-crf", "18",
-                    "-c:a", "copy",
                     str(output_path),
                 ],
                 check=True,
@@ -126,27 +193,34 @@ def process_video(input_path: Path) -> None:
             print(f"Error: ffmpeg failed:\n{e.stderr.decode()}")
             sys.exit(1)
     finally:
-        cap.release()
+        for cap in caps:
+            cap.release()
         os.unlink(tmp_path)
 
     print(f"Saved to {output_path}")
 
 
 def main() -> None:
-    if len(sys.argv) != 2:
-        print("Usage: python slice_and_compose.py <input>")
+    if len(sys.argv) < 2:
+        print("Usage: python recut.py <input> [input2 ...]")
         sys.exit(1)
 
-    input_path = Path(sys.argv[1])
-    if not input_path.exists():
-        print(f"Error: file not found: {input_path}")
+    paths = [Path(a) for a in sys.argv[1:]]
+    for p in paths:
+        if not p.exists():
+            print(f"Error: file not found: {p}")
+            sys.exit(1)
+
+    exts = [p.suffix.lower() for p in paths]
+    if len(set(exts)) > 1:
+        print("Error: all inputs must be the same file type")
         sys.exit(1)
 
-    ext = input_path.suffix.lower()
+    ext = exts[0]
     if ext in IMAGE_EXTENSIONS:
-        process_image(input_path)
+        process_image(paths)
     elif ext in VIDEO_EXTENSIONS:
-        process_video(input_path)
+        process_video(paths)
     else:
         print(f"Error: unsupported file type '{ext}'")
         sys.exit(1)
