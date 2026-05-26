@@ -167,11 +167,8 @@ def process_video(paths: list) -> None:
                 print("\nError: one or more inputs yielded no readable frames")
                 sys.exit(1)
 
-            if n == 1:
-                out_frame = _transform_bgr(frames[0])
-            else:
-                pils = [_frame_to_pil(f) for f in frames]
-                out_frame = _pil_to_bgr(_compose(pils))
+            pils = [_frame_to_pil(f) for f in frames]
+            out_frame = _pil_to_bgr(_compose(pils))
 
             writer.write(out_frame)
             idx += 1
