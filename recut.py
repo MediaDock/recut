@@ -188,7 +188,7 @@ def process_video(paths: list) -> None:
                     "ffmpeg", "-y",
                     "-i", tmp_path,
                     "-map", "0:v:0",
-                    "-c:v", "libx264",
+                    "-c:v", "libx265",
                     "-crf", "18",
                     str(output_path),
                 ],
