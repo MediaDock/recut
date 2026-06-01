@@ -183,15 +183,12 @@ def process_video(paths: list) -> None:
         video_path = next(p for p in paths if p.suffix.lower() in VIDEO_EXTENSIONS)
         output_path = video_path.parent / (stem + video_path.suffix)
         try:
+            ffmpeg_cmd = ["ffmpeg", "-y", "-i", tmp_path, "-map", "0:v:0"]
+            if fps > 30:
+                ffmpeg_cmd += ["-vf", "fps=30"]
+            ffmpeg_cmd += ["-c:v", "libx265", "-crf", "18", str(output_path)]
             subprocess.run(
-                [
-                    "ffmpeg", "-y",
-                    "-i", tmp_path,
-                    "-map", "0:v:0",
-                    "-c:v", "libx265",
-                    "-crf", "18",
-                    str(output_path),
-                ],
+                ffmpeg_cmd,
                 check=True,
                 capture_output=True,
             )
