@@ -115,11 +115,23 @@ def process_video(paths: list) -> None:
             caps.append(cap)
             static_frames.append(None)
 
-    video_caps = [cap for cap in caps if cap is not None]
-    fps_values = [cap.get(cv2.CAP_PROP_FPS) for cap in video_caps]
-    fps = max(fps_values)
-    frame_counts = [int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) for cap in video_caps]
-    total_frames = max(frame_counts) if all(fc > 0 for fc in frame_counts) else 0
+    # Per-input source fps (None for image inputs); cap the output at 60 fps.
+    src_fps = [None if cap is None else (cap.get(cv2.CAP_PROP_FPS) or 0.0) for cap in caps]
+    video_fps = [f for f in src_fps if f]
+    if not video_fps:
+        print("Error: could not determine frame rate of any video input")
+        sys.exit(1)
+    out_fps = min(max(video_fps), 60.0)
+
+    # Output length is driven by the longest input in *time*, not frame count.
+    durations = []
+    for i, cap in enumerate(caps):
+        if cap is None:
+            continue
+        fc = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if fc > 0 and src_fps[i]:
+            durations.append(fc / src_fps[i])
+    total_out_frames = round(max(durations) * out_fps) if len(durations) == len(video_fps) else 0
 
     widths, heights = [], []
     for i, p in enumerate(paths):
@@ -140,27 +152,38 @@ def process_video(paths: list) -> None:
         writer = cv2.VideoWriter(
             tmp_path,
             cv2.VideoWriter_fourcc(*"mp4v"),
-            fps,
+            out_fps,
             (1920, 1080),
         )
 
         last_frames = [None] * n
+        read_count = [-1] * n                   # index of last frame read per video cap
+        ended = [cap is None for cap in caps]    # image inputs never "end"
         idx = 0
 
         while True:
-            any_ok = False
+            if total_out_frames and idx >= total_out_frames:
+                break
+
+            out_t = idx / out_fps
             frames = []
             for i, cap in enumerate(caps):
                 if cap is None:
                     frames.append(static_frames[i])
-                else:
+                    continue
+                # Advance this video to the source frame matching the output time,
+                # so every input plays at real-time speed regardless of its fps.
+                target = round(out_t * src_fps[i])
+                while read_count[i] < target and not ended[i]:
                     ok, frame = cap.read()
                     if ok:
+                        read_count[i] += 1
                         last_frames[i] = frame
-                        any_ok = True
-                    frames.append(last_frames[i])
+                    else:
+                        ended[i] = True
+                frames.append(last_frames[i])
 
-            if not any_ok:
+            if all(ended):
                 break
 
             if any(f is None for f in frames):
@@ -172,7 +195,7 @@ def process_video(paths: list) -> None:
 
             writer.write(out_frame)
             idx += 1
-            label = str(total_frames) if total_frames else "?"
+            label = str(total_out_frames) if total_out_frames else "?"
             print(f"\rFrame {idx}/{label}", end="", flush=True)
 
         writer.release()
