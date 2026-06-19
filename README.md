@@ -10,7 +10,6 @@ Prepares content for the LED banner by slicing an image (or video frame) into th
 | Input height | must evenly divide 104 px |
 | Image formats | JPEG, PNG, BMP, TIFF, WebP |
 | Video formats | MP4, MOV |
-| Max frame rate | 30 fps (higher inputs are downsampled) |
 
 A single input is remapped directly if it is 4160 px wide, or tiled to fill 4160 px if narrower. Multiple inputs are stitched side by side and the combined strip is tiled — so two 1040 px inputs become a 2080 px unit that repeats twice. The combined width must evenly divide 4160, and each input's height must evenly divide 104. For videos with different lengths, shorter inputs freeze on their last frame. Images and videos can be mixed freely — images are treated as static frames held for the full duration of the video.
 
