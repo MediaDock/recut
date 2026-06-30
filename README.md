@@ -5,7 +5,6 @@ Prepares content for the LED banner by slicing an image (or video frame) into th
 | | |
 |---|---|
 | LED wall | 4160 × 104 px |
-| Output canvas | 1920 × 1080 px |
 | Input width | must evenly divide 4160 px (e.g. 1040, 2080, 4160) |
 | Input height | must evenly divide 104 px |
 | Image formats | JPEG, PNG, BMP, TIFF, WebP |
