@@ -115,14 +115,13 @@ def process_video(paths: list) -> None:
             caps.append(cap)
             static_frames.append(None)
 
-    # Per-input source fps (None for image inputs); cap the output at 30 fps
-    # so the player stays smooth on playback.
+    # Per-input source fps (None for image inputs); cap the output at 60 fps.
     src_fps = [None if cap is None else (cap.get(cv2.CAP_PROP_FPS) or 0.0) for cap in caps]
     video_fps = [f for f in src_fps if f]
     if not video_fps:
         print("Error: could not determine frame rate of any video input")
         sys.exit(1)
-    out_fps = min(max(video_fps), 30.0)
+    out_fps = min(max(video_fps), 60.0)
 
     # Output length is driven by the longest input in *time*, not frame count.
     durations = []
@@ -206,12 +205,10 @@ def process_video(paths: list) -> None:
         stem = "_".join(p.stem for p in paths) + "_recut"
         video_path = next(p for p in paths if p.suffix.lower() in VIDEO_EXTENSIONS)
         output_path = video_path.parent / (stem + video_path.suffix)
-        print(f"Encoding {idx} frames with libx265 (this can take a while on long clips)...")
         try:
             subprocess.run(
                 [
                     "ffmpeg", "-y",
-                    "-hide_banner", "-loglevel", "warning", "-stats",
                     "-i", tmp_path,
                     "-map", "0:v:0",
                     "-c:v", "libx265",
@@ -219,12 +216,13 @@ def process_video(paths: list) -> None:
                     str(output_path),
                 ],
                 check=True,
+                capture_output=True,
             )
         except FileNotFoundError:
             print("Error: ffmpeg not found — install it to process video")
             sys.exit(1)
-        except subprocess.CalledProcessError:
-            print("Error: ffmpeg failed (see output above)")
+        except subprocess.CalledProcessError as e:
+            print(f"Error: ffmpeg failed:\n{e.stderr.decode()}")
             sys.exit(1)
     finally:
         for cap in caps:
